@@ -436,11 +436,20 @@ class AgentLoop:
                     # Split one answer into distinct stream segments.
                     stream_base_id = f"{msg.session_key}:{time.time_ns()}"
                     stream_segment = 0
+                    stream_suppressed = False  # GMSF: track if __SKIP__ detected in stream
 
                     def _current_stream_id() -> str:
                         return f"{stream_base_id}:{stream_segment}"
 
                     async def on_stream(delta: str) -> None:
+                        nonlocal stream_suppressed
+                        # GMSF: first delta is __SKIP__ → suppress entire stream
+                        if delta.strip() == "__SKIP__":
+                            stream_suppressed = True
+                            logger.info("GMSF: suppressing stream for {}:{} (irrelevant group message)", msg.channel, msg.sender_id)
+                            return
+                        if stream_suppressed:
+                            return
                         meta = dict(msg.metadata or {})
                         meta["_stream_delta"] = True
                         meta["_stream_id"] = _current_stream_id()
@@ -452,6 +461,8 @@ class AgentLoop:
 
                     async def on_stream_end(*, resuming: bool = False) -> None:
                         nonlocal stream_segment
+                        if stream_suppressed:
+                            return  # GMSF: skip stream end for suppressed responses
                         meta = dict(msg.metadata or {})
                         meta["_stream_end"] = True
                         meta["_resuming"] = resuming
@@ -590,6 +601,11 @@ class AgentLoop:
             channel=msg.channel, chat_id=msg.chat_id,
             message_id=msg.metadata.get("message_id"),
         )
+
+        # GMSF: intercept __SKIP__ signal — suppress all outbound for irrelevant group messages
+        if final_content is not None and final_content.strip() == "__SKIP__":
+            logger.info("GMSF: suppressing __SKIP__ response for {}:{} (irrelevant group message)", msg.channel, msg.sender_id)
+            return None
 
         if final_content is None or not final_content.strip():
             final_content = EMPTY_FINAL_RESPONSE_MESSAGE
