@@ -1470,9 +1470,8 @@ class FeishuChannel(BaseChannel):
             while len(self._processed_message_ids) > 1000:
                 self._processed_message_ids.popitem(last=False)
 
-            # Skip bot messages
-            if sender.sender_type == "bot":
-                return
+            # Note: Bot messages are now allowed to be processed (for inter-bot communication in groups)
+            # GMSF protocol will prevent unnecessary replies to irrelevant bot messages
 
             sender_id = sender.sender_id.open_id if sender.sender_id else "unknown"
             chat_id = message.chat_id
