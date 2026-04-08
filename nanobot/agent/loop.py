@@ -437,27 +437,37 @@ class AgentLoop:
                     stream_base_id = f"{msg.session_key}:{time.time_ns()}"
                     stream_segment = 0
                     stream_suppressed = False  # GMSF: track if __SKIP__ detected in stream
+                    stream_buffer = ""  # GMSF: buffer for detecting split __SKIP__ tokens
 
                     def _current_stream_id() -> str:
                         return f"{stream_base_id}:{stream_segment}"
 
                     async def on_stream(delta: str) -> None:
-                        nonlocal stream_suppressed
-                        # GMSF: first delta is __SKIP__ → suppress entire stream
-                        if delta.strip() == "__SKIP__":
-                            stream_suppressed = True
-                            logger.info("GMSF: suppressing stream for {}:{} (irrelevant group message)", msg.channel, msg.sender_id)
-                            return
+                        nonlocal stream_suppressed, stream_buffer
+                        # GMSF: detect and suppress __SKIP__ in streaming mode
                         if stream_suppressed:
                             return
-                        meta = dict(msg.metadata or {})
-                        meta["_stream_delta"] = True
-                        meta["_stream_id"] = _current_stream_id()
-                        await self.bus.publish_outbound(OutboundMessage(
-                            channel=msg.channel, chat_id=msg.chat_id,
-                            content=delta,
-                            metadata=meta,
-                        ))
+                        
+                        stream_buffer += delta
+                        
+                        # Check if buffer matches __SKIP__ (handles split deltas)
+                        if stream_buffer.strip() == "__SKIP__":
+                            stream_suppressed = True
+                            stream_buffer = ""
+                            logger.info("GMSF: suppressing stream for {}:{} (irrelevant group message)", msg.channel, msg.sender_id)
+                            return
+                        
+                        # If buffer exceeds __SKIP__ length or clearly isn't __SKIP__, flush it
+                        if len(stream_buffer) > len("__SKIP__") or (stream_buffer.strip() and not "__SKIP__".startswith(stream_buffer.strip())):
+                            meta = dict(msg.metadata or {})
+                            meta["_stream_delta"] = True
+                            meta["_stream_id"] = _current_stream_id()
+                            await self.bus.publish_outbound(OutboundMessage(
+                                channel=msg.channel, chat_id=msg.chat_id,
+                                content=stream_buffer,
+                                metadata=meta,
+                            ))
+                            stream_buffer = ""
 
                     async def on_stream_end(*, resuming: bool = False) -> None:
                         nonlocal stream_segment
