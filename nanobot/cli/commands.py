@@ -878,8 +878,38 @@ def gateway(
     ))
     console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
 
+    # ---- Start HTTP API Server alongside Gateway ----
+    from nanobot.api.server import create_app
+
+    api_cfg = config.api
+    api_host = api_cfg.host
+    api_port = api_cfg.port
+    api_timeout = api_cfg.timeout
+    model_name = config.agents.defaults.model
+
+    api_app = create_app(agent, model_name=model_name, request_timeout=api_timeout)
+
+    async def on_api_startup(_app):
+        await agent._connect_mcp()
+
+    async def on_api_cleanup(_app):
+        await agent.close_mcp()
+
+    api_app.on_startup.append(on_api_startup)
+    api_app.on_cleanup.append(on_api_cleanup)
+
+    # Create a runner for the API app
+    from aiohttp import web
+    api_runner = web.AppRunner(api_app)
+
     async def run():
         try:
+            # Start API server
+            await api_runner.setup()
+            api_site = web.TCPSite(api_runner, host=api_host, port=api_port)
+            await api_site.start()
+            console.print(f"[green]✓[/green] HTTP API: http://{api_host}:{api_port}")
+
             await cron.start()
             await heartbeat.start()
             await asyncio.gather(
@@ -900,6 +930,7 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
+            await api_runner.cleanup()
 
     asyncio.run(run())
 
