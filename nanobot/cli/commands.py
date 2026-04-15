@@ -887,7 +887,23 @@ def gateway(
     api_timeout = api_cfg.timeout
     model_name = config.agents.defaults.model
 
-    api_app = create_app(agent, model_name=model_name, request_timeout=api_timeout)
+    # Resolve owner chat ID for cross-agent message forwarding
+    owner_chat_id = getattr(config.gateway, "owner_chat_id", "")
+    if not owner_chat_id:
+        # Fallback: find most recent feishu session
+        for item in session_manager.list_sessions():
+            key = item.get("key", "")
+            if key.startswith("feishu:") and not key.startswith("feishu:oc_"):
+                owner_chat_id = key.split(":", 1)[1]
+                break
+
+    api_app = create_app(
+        agent,
+        model_name=model_name,
+        request_timeout=api_timeout,
+        channels=channels,
+        owner_chat_id=owner_chat_id,
+    )
 
     async def on_api_startup(_app):
         await agent._connect_mcp()

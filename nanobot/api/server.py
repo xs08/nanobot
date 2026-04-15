@@ -165,6 +165,30 @@ async def _parse_multipart(request: web.Request) -> tuple[str, list[str], str | 
 # Route handlers
 # ---------------------------------------------------------------------------
 
+async def _forward_to_owner(app: web.Application, sender_name: str, text: str) -> None:
+    """Forward a message received from another Agent to the owner via Feishu."""
+    channels = app.get("channels")
+    owner_chat_id = app.get("owner_chat_id", "")
+    if not channels or not owner_chat_id:
+        return
+
+    feishu = channels.channels.get("feishu")
+    if not feishu:
+        return
+
+    from nanobot.bus.events import OutboundMessage
+    forward_msg = OutboundMessage(
+        channel="feishu",
+        chat_id=owner_chat_id,
+        content=f"📬 **来自 {sender_name} 的消息**\n\n{text}",
+    )
+    try:
+        await feishu.send(forward_msg)
+        logger.info("Forwarded message from {} to owner", sender_name)
+    except Exception:
+        logger.exception("Failed to forward message from {} to owner", sender_name)
+
+
 async def handle_chat_completions(request: web.Request) -> web.Response:
     """POST /v1/chat/completions — supports JSON and multipart/form-data."""
     content_type = request.content_type or ""
@@ -174,6 +198,9 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
     agent_loop = request.app["agent_loop"]
     timeout_s: float = request.app.get("request_timeout", 120.0)
     model_name: str = request.app.get("model_name", "nanobot")
+
+    # Detect if this request comes from another Agent
+    sender_agent = request.headers.get("X-Agent-Sender", "")
 
     try:
         if content_type.startswith("multipart/"):
@@ -197,11 +224,15 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
         logger.exception("Error parsing upload")
         return _error_json(413, "File too large or invalid upload")
 
+    # Forward to owner if from another Agent
+    if sender_agent:
+        asyncio.create_task(_forward_to_owner(request.app, sender_agent, text))
+
     session_key = f"api:{session_id}" if session_id else API_SESSION_KEY
     session_locks: dict[str, asyncio.Lock] = request.app["session_locks"]
     session_lock = session_locks.setdefault(session_key, asyncio.Lock())
 
-    logger.info("API request session_key={} media={} text={}", session_key, len(media_paths), text[:80])
+    logger.info("API request session_key={} media={} text={} sender={}", session_key, len(media_paths), text[:80], sender_agent or "direct")
 
     _FALLBACK = EMPTY_FINAL_RESPONSE_MESSAGE
 
@@ -274,19 +305,29 @@ async def handle_health(request: web.Request) -> web.Response:
 # App factory
 # ---------------------------------------------------------------------------
 
-def create_app(agent_loop, model_name: str = "nanobot", request_timeout: float = 120.0) -> web.Application:
+def create_app(
+    agent_loop,
+    model_name: str = "nanobot",
+    request_timeout: float = 120.0,
+    channels=None,
+    owner_chat_id: str = "",
+) -> web.Application:
     """Create the aiohttp application.
 
     Args:
         agent_loop: An initialized AgentLoop instance.
         model_name: Model name reported in responses.
         request_timeout: Per-request timeout in seconds.
+        channels: Optional ChannelManager for forwarding messages.
+        owner_chat_id: Chat ID of the owner for message forwarding.
     """
     app = web.Application(client_max_size=20 * 1024 * 1024)  # 20MB for base64 images
     app["agent_loop"] = agent_loop
     app["model_name"] = model_name
     app["request_timeout"] = request_timeout
     app["session_locks"] = {}  # per-user locks, keyed by session_key
+    app["channels"] = channels
+    app["owner_chat_id"] = owner_chat_id
 
     app.router.add_post("/v1/chat/completions", handle_chat_completions)
     app.router.add_get("/v1/models", handle_models)
