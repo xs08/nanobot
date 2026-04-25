@@ -152,6 +152,7 @@ class HeartbeatConfig(Base):
 class ApiConfig(Base):
     """OpenAI-compatible API server configuration."""
 
+    enabled: bool = False  # Whether to start the API server in gateway mode.
     host: str = "127.0.0.1"  # Safer default: local-only bind.
     port: int = 8900
     timeout: float = 120.0  # Per-request timeout in seconds.
