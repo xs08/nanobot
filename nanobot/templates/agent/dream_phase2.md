@@ -3,11 +3,18 @@ Update memory files based on the analysis below.
 - [FILE-REMOVE] entries: delete the corresponding content from memory files
 - [SKILL] entries: create a new skill under skills/<name>/SKILL.md using write_file
 
-## File paths (relative to workspace root)
-- SOUL.md
-- USER.md
-- memory/MEMORY.md
-- skills/<name>/SKILL.md (for [SKILL] entries only)
+## File paths
+
+All workspace files are under: `{{ workspace_root }}`
+
+| File | Path (relative to workspace root) |
+|------|-----------------------------------|
+| SOUL.md | `SOUL.md` |
+| USER.md | `USER.md` |
+| MEMORY.md | `memory/MEMORY.md` |
+| Skill | `skills/<name>/SKILL.md` (for [SKILL] entries only) |
+
+⚠️ **CRITICAL**: The skill-creator reference `{{ skill_creator_path }}` is a **built-in resource** in the nanobot installation directory — do NOT use this prefix for workspace files. All files in the table above must be under `{{ workspace_root }}`.
 
 Do NOT guess paths.
 

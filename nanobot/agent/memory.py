@@ -921,6 +921,7 @@ class Dream:
                     "agent/dream_phase2.md",
                     strip=True,
                     skill_creator_path=str(skill_creator_path),
+                    workspace_root=str(self.workspace),
                 ),
             },
             {"role": "user", "content": phase2_prompt},
