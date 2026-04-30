@@ -731,6 +731,7 @@ class Dream:
         annotate_line_ages: bool = True,
     ):
         self.store = store
+        self.workspace = store.workspace  # cached for direct access (e.g. Phase 2 prompt rendering)
         self.provider = provider
         self.model = model
         self.max_batch_size = max_batch_size
